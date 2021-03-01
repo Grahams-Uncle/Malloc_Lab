@@ -1,11 +1,12 @@
 /*
  * mm.c
  *
- * Name: Robert Ramstad
+ * Name: Robert Ramstad, Xinchang Xiong
  *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
- * Also, read malloclab.pdf carefully and in its entirety before beginning.
+ * NOTE TO STUDENTS: This first submission was simply us understanding and implementing a poor mans memory function. We opted
+ * to use the example from the book. As you can tell we changed the macros into functions (as required by the instructions) and then did the same implementation as the textbook.
+ * Realloc was not implemented in the book, so I used the instructions and my previous implementations of the other functions (Malloc and Free) to make our Realloc fully operational.
+ * The next steps we will have to take is to start optimizing the functions so that we can get better throughput..
  *
  */
 #include <assert.h>
@@ -50,7 +51,7 @@
 /* Global Variables */
 #define WSIZE 8 /* Word and header/footer size (bytes) */
 #define DSIZE 16 /* Double word size (bytes) */
-#define CHUNKSIZE (1<<12) /* Extend heap by this amount (bytes) */
+#define CHUNKSIZE (1<<24) /* Extend heap by this amount (bytes) */
 static char* heap_listp = 0;
 
 /* What is the correct alignment? */
@@ -73,11 +74,11 @@ static size_t PACK(size_t size, int alloc){
 	return( ((size) | (alloc)) );
 }
 static size_t GET(void* p){ //function for get
-	return( (*(unsigned int *)(p)) );
+	return( (*(size_t *)(p)) );
 }
 
 static void PUT(void* p, size_t val) {
-	(*(unsigned int *)(p) = (val));
+	(*(size_t *)(p) = (val));
 }
 
 static size_t GET_SIZE(void* p){
@@ -275,9 +276,10 @@ void* realloc(void* oldptr, size_t size)
 		free(oldptr);
 	}
 	
-	oldsize = GET_SIZE(oldptr);
+	oldsize = GET_SIZE(HDRP(oldptr));
+
 	newptr = malloc(size);
-	mem_memcpy(newptr, oldptr, MIN(size,oldsize));
+	memcpy(newptr, oldptr, MIN(size, oldsize));
 	free(oldptr);
 	
 	return newptr;
