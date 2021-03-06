@@ -51,9 +51,9 @@
 /* Global Variables */
 #define WSIZE 8 /* Word and header/footer size (bytes) */
 #define DSIZE 16 /* Double word size (bytes) */
-#define CHUNKSIZE (1<<24) /* Extend heap by this amount (bytes) */
+#define CHUNKSIZE (1<<12) /* Extend heap by this amount (bytes) */
 static char* heap_listp = 0;
-
+static char* free_listp;
 /* What is the correct alignment? */
 #define ALIGNMENT 16
 
@@ -105,21 +105,106 @@ static void* PREV_BLKP(void* bp){
 	return( ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) );
 }
 
+/* Functions for explicit list */
+static void* GET_PREV(void* bp){
+	return (*(void **)(bp));
+}
+
+static void SET_PREV(void* bp, void* prevp){
+	(*(void **)(bp) = (prevp));
+}
+
+static void* GET_NEXT(void* bp){
+	return *((void **)(bp + WSIZE));
+}
+
+static void SET_NEXT(void* bp, void* nextp){
+	*((void **)(bp + WSIZE)) = nextp;
+}
+
+static void remove_free_list(void* bp){
+    /* Get the address of the previous and next free block */
+    void* prev = (void *) GET_PREV(bp);
+    void* next = (void *) GET_NEXT(bp);
+
+    SET_PREV(bp, 0);
+    SET_NEXT(bp, 0);
+
+    if(prev == NULL){
+        if(next == NULL){ // this block not linked to other blocks
+            free_listp = NULL;
+
+        }
+        else{ // this block is the start of linked list
+            SET_PREV(next, 0); // set pointer to next block 0
+            free_listp = next; // set the head of free list to the addr of next block
+
+        }
+    }
+    else{
+        if(next == NULL){//this block is the end of linked list
+            SET_NEXT(prev, 0); //set the previous block as the last in the list
+
+        }
+        else{
+            /* this block is in the middle of linked list
+               set previous free block and the next free block
+               point to each other */
+            SET_PREV(next, prev);
+            SET_NEXT(prev, next);
+
+        }
+    }
+	/*
+	for (char* ptr = free_listp; ptr != NULL; ptr = GET_NEXT(ptr)) {
+		printf("current: %p; prev: %p; next: %p\n",ptr, GET_PREV(ptr),GET_NEXT(ptr));
+	}
+	printf("\n\n");
+	*/
+}
+
+static void insert_free_list(void* bp){
+    if(free_listp == NULL && bp!= NULL){ //this block is the first in the list
+        free_listp = bp; //set free_listp points this block
+        return;
+    }
+
+    if(bp != NULL){
+        // 
+		SET_NEXT(bp, free_listp);
+        SET_PREV(free_listp, bp);
+        free_listp = bp; //move the head to point to the new block
+		/*
+		for (bp = free_listp; bp != NULL; bp = GET_NEXT(bp)) {
+			printf("current: %p; prev: %p; next: %p\n",bp, GET_PREV(bp),GET_NEXT(bp));
+		}
+		printf("\n\n");
+		*/
+        return;
+    }else{
+		printf("bp is NULL\n");
+	}
+    
+}
+
 static void *coalesce(void *bp){ // boundary tag coalesching to merge blocks (from textbook)
 	size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
 	size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
 	size_t size = GET_SIZE(HDRP(bp));
 
 	if (prev_alloc && next_alloc) { /* Case 1 */
+		insert_free_list(bp);
 		return bp;
 	}
 
 	else if (prev_alloc && !next_alloc) { /* Case 2 */
+		remove_free_list(NEXT_BLKP(bp));
 		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
 		PUT(HDRP(bp), PACK(size, 0));
 		PUT(FTRP(bp), PACK(size,0));
 	}
 	else if (!prev_alloc && next_alloc) { /* Case 3 */
+		remove_free_list(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 		PUT(FTRP(bp), PACK(size, 0));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
@@ -127,12 +212,16 @@ static void *coalesce(void *bp){ // boundary tag coalesching to merge blocks (fr
 	}
 
 	else { /* Case 4 */
+		remove_free_list(PREV_BLKP(bp));
+		remove_free_list(NEXT_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
-			GET_SIZE(FTRP(NEXT_BLKP(bp)));
+		GET_SIZE(FTRP(NEXT_BLKP(bp)));
 		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
 		PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
 		bp = PREV_BLKP(bp);
 	}
+	insert_free_list(bp);
+	//printf("current: %p; prev: %p; next: %p\n",bp, GET_PREV(bp),GET_NEXT(bp));
 	return bp;
 }
 
@@ -149,6 +238,9 @@ static void *extend_heap(size_t words) //extends the heap with new free block(fr
 	/* Initialize free block header/footer and the epilogue header */
 	PUT(HDRP(bp), PACK(size, 0)); /* Free block header */
 	PUT(FTRP(bp), PACK(size, 0)); /* Free block footer */
+	SET_PREV(bp, 0); 
+    SET_NEXT(bp, 0);
+
 	PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */
 
 	/* Coalesce if the previous block was free */
@@ -159,8 +251,8 @@ static void* find_fit(size_t asize){ //Finds a fitting block of size "asize" (fr
 	/* First fit search */
 	void *bp;
 
-	for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-		if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+	for (bp = free_listp; bp != NULL; bp = GET_NEXT(bp)) {
+		if (asize <= GET_SIZE(HDRP(bp))) {
 			return bp;
 		}
 	}
@@ -170,13 +262,18 @@ static void* find_fit(size_t asize){ //Finds a fitting block of size "asize" (fr
 static void place(void *bp, size_t asize)
  {
 	size_t csize = GET_SIZE(HDRP(bp));
-
-	if ((csize - asize) >= (2*DSIZE)) {
+	//printf("found block: %lu; address: %p\n", GET_SIZE(FTRP(bp)), bp);
+	//printf("need size: %lu\n", asize);
+	remove_free_list(bp);
+	if ((csize - asize) >= (2*DSIZE)) { //split
 		PUT(HDRP(bp), PACK(asize, 1));
 		PUT(FTRP(bp), PACK(asize, 1));
 		bp = NEXT_BLKP(bp);
 		PUT(HDRP(bp), PACK(csize-asize, 0));
 		PUT(FTRP(bp), PACK(csize-asize, 0));
+		SET_PREV(bp, 0);
+        SET_NEXT(bp, 0);
+        coalesce(bp);
 	}
 	else {
 		PUT(HDRP(bp), PACK(csize, 1));
@@ -199,6 +296,7 @@ bool mm_init(void)
  	PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
  	PUT(heap_listp + (3*WSIZE), PACK(0, 1)); /* Epilogue header */
  	heap_listp += (2*WSIZE);
+	free_listp = NULL;
 
  	/* Extend the empty heap with a free block of CHUNKSIZE bytes */
  	if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
@@ -213,6 +311,7 @@ bool mm_init(void)
  */
 void* malloc(size_t size)
 {
+	//printf("malloc size: %lu\n", size);
     /* IMPLEMENT THIS */
 	size_t asize; /* Adjusted block size */
 	size_t extendsize; /* Amount to extend heap if no fit */
@@ -253,9 +352,12 @@ void free(void* ptr)
 {
     /* IMPLEMENT THIS */ 
 	size_t size = GET_SIZE(HDRP(ptr));
-    
+    //printf("free pointer size: %lu\n", size);
 	PUT(HDRP(ptr), PACK(size, 0));
 	PUT(FTRP(ptr), PACK(size, 0));
+
+	SET_PREV(ptr, 0);
+    SET_NEXT(ptr, 0);
 	coalesce(ptr);
 }
 
@@ -283,9 +385,6 @@ void* realloc(void* oldptr, size_t size)
 	free(oldptr);
 	
 	return newptr;
-	
-	 
-	
 }
 
 /*
