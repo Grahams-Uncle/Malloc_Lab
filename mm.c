@@ -1,5 +1,5 @@
 /*
- * mm.c
+mm.c
  *
  * Name: Robert Ramstad, Xinchang Xiong
  *
@@ -250,12 +250,27 @@ static void *extend_heap(size_t words) //extends the heap with new free block(fr
 static void* find_fit(size_t asize){ //Finds a fitting block of size "asize" (from textbook)
 	/* First fit search */
 	void *bp;
+	void *smallbp = NULL;
+	size_t smallSizeDif = 1000000000000;
+	size_t Dif = 1000000000000;
 
 	for (bp = free_listp; bp != NULL; bp = GET_NEXT(bp)) {
-		if (asize <= GET_SIZE(HDRP(bp))) {
+		if (asize == GET_SIZE(HDRP(bp))) {
 			return bp;
 		}
+		else if (asize < GET_SIZE(HDRP(bp))) {
+			Dif = GET_SIZE(HDRP(bp)) - asize;
+			if (Dif <= smallSizeDif){
+				smallSizeDif = Dif;
+				smallbp = bp;
+			}
+
+		}
 	}
+	if (smallbp != NULL){
+		return smallbp;
+	}
+
 	return NULL;
 }
 
@@ -364,27 +379,53 @@ void free(void* ptr)
 /*
  * realloc
  */
-void* realloc(void* oldptr, size_t size)
+void* realloc(void* ptr, size_t size)
 {
 
 	size_t oldsize;
 	char *newptr;
+	size_t asize;
+
+	/* Adjust block size to include overhead and alignment reqs. */
+	if (size <= DSIZE){
+		asize = 2*DSIZE;
+		}
+	else{
+		asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
+		}
+		
     /* IMPLEMENT THIS */
-	if (oldptr == NULL){
+	if (ptr == NULL){
 		return( malloc(size) );
 	}
 	
 	if (size == 0){
-		free(oldptr);
+		free(ptr);
 	}
-	
-	oldsize = GET_SIZE(HDRP(oldptr));
+	oldsize = GET_SIZE(HDRP(ptr));
 
-	newptr = malloc(size);
-	memcpy(newptr, oldptr, MIN(size, oldsize));
-	free(oldptr);
+	if (asize == oldsize){
+		return ptr;
+	}	
 	
-	return newptr;
+	if (asize <= oldsize){//decreases size of block and frees the created block if allowed
+		size = asize;
+
+		if (oldsize - size <= 2*DSIZE + WSIZE){ //checks if the block extension can fit a new block
+			return ptr;
+		}
+		PUT(HDRP(ptr), PACK(size, 1));
+		PUT(FTRP(ptr), PACK(size, 1));
+		PUT(HDRP(NEXT_BLKP(ptr)), PACK(oldsize-size, 1));
+		free(NEXT_BLKP(ptr));
+		return ptr;
+	}
+	newptr = malloc(size);
+
+	memcpy(newptr, ptr, MIN(oldsize,size));
+	free(ptr);
+
+	return newptr;	
 }
 
 /*
