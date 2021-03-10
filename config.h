@@ -61,8 +61,8 @@
 /*
  * Students get 0 points for this allocation fraction or below
  */
-#define MIN_SPACE_CHECKPOINT 0.40
-#define MIN_SPACE       0.50
+#define MIN_SPACE_CHECKPOINT 0.30
+#define MIN_SPACE       0.40
 
 
 /* 
