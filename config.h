@@ -57,7 +57,7 @@
  * Students get 0 points for this point or below (ops / sec)
  */
 #define MIN_SPEED_RATIO_CHECKPOINT 0.00
-#define MIN_SPEED_RATIO       0.30
+#define MIN_SPEED_RATIO       0.20
 /*
  * Students get 0 points for this allocation fraction or below
  */
@@ -70,7 +70,7 @@
  * this point (in ops / sec)
  */
 #define MAX_SPEED_RATIO_CHECKPOINT 0.05
-#define MAX_SPEED_RATIO       0.90
+#define MAX_SPEED_RATIO       0.40
 
 /* 
  * Students can get more points for building more efficient allocators,
