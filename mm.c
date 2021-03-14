@@ -3,11 +3,33 @@ mm.c
  *
  * Name: Robert Ramstad, Xinchang Xiong
  *
- * NOTE TO STUDENTS: This first submission was simply us understanding and implementing a poor mans memory function. We opted
- * to use the example from the book. As you can tell we changed the macros into functions (as required by the instructions) and then did the same implementation as the textbook.
- * Realloc was not implemented in the book, so I used the instructions and my previous implementations of the other functions (Malloc and Free) to make our Realloc fully operational.
- * The heapptr steps we will have to take is to start optimizing the functions so that we can get better throughput..
+ * NOTE TO STUDENTS: For our final submission we decided to implement an Explicit Free List with a Front placement policy (for adding to free)
+ * and a Best Fit finding policy. As mentioned in the video, we also created a Segregated list but it did not give us the desired throughput
+ * so we are rolling with our Explicit Free. The main challenge of this implementeation is keeping track of all the pointers and doing the proper
+ * arithmetic on them. We created helper functions to make sure that we were properly doing this throughout the code and to make the
+ * code easier to read. We were getting fantastic throughput with our initial first fit search, so we decided to implement a best fit search, which 
+ * drastically increased our util while marginally lowering our throughput. As for our front placement policy, this was chosen due to the ease of implementation and 
+ * because it helps keep our throughput high. I have added a little infographic describing the layout of the blocks below. Note that the free list is saved
+ * as a doubly linked list in order to coalesce both forwards and backwards.
+*
+ Block Layout:
+ * An explicit list uses the payload to save the pointers of the previous and next free blocks
+ * within a free block. The free and allocated block organizations are shown below:
  *
+ * Allocated Block          Free Block
+ *  ---------               ---------
+ * | HEADER  |             | HEADER  |
+ *  ---------               ---------
+ * |         |             |  NEXT   |
+ * |         |              ---------
+ * | PAYLOAD |             |  PREV   |
+ * |         |              ---------
+ * |         |             |         |
+ *  ---------              |         |
+ * | FOOTER  |              ---------
+ *  ---------              | FOOTER  |
+ *                          ---------
+ * 
  */
 #include <assert.h>
 #include <stdio.h>
@@ -478,9 +500,10 @@ bool mm_checkheap(int lineno)
      	}
  	}
     /* Make sure no allocated blocks overlap*/
- 	for (heapptr = free_listp; heapptr != NULL; heapptr = GET_NEXT(heapptr)){
+ 	for (heapptr = heap_listp; heapptr != NULL; heapptr = GET_NEXT(heapptr)){
  		if FTRP(heapptr) > HDRP(GET_NEXT(heapptr)) {
  			printf("Error, illegal overlap at %p", heapptr);
+ 			return false;
  		}
  	}
     /* Are all blocks coalesced?*/
