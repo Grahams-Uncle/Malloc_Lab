@@ -6,7 +6,7 @@ mm.c
  * NOTE TO STUDENTS: This first submission was simply us understanding and implementing a poor mans memory function. We opted
  * to use the example from the book. As you can tell we changed the macros into functions (as required by the instructions) and then did the same implementation as the textbook.
  * Realloc was not implemented in the book, so I used the instructions and my previous implementations of the other functions (Malloc and Free) to make our Realloc fully operational.
- * The next steps we will have to take is to start optimizing the functions so that we can get better throughput..
+ * The heapptr steps we will have to take is to start optimizing the functions so that we can get better throughput..
  *
  */
 #include <assert.h>
@@ -53,7 +53,9 @@ mm.c
 #define DSIZE 16 /* Double word size (bytes) */
 #define CHUNKSIZE (1<<12) /* Extend heap by this amount (bytes) */
 static char* heap_listp = 0;
+static char* final_block = 0;
 static char* free_listp;
+
 /* What is the correct alignment? */
 #define ALIGNMENT 16
 
@@ -89,6 +91,10 @@ static size_t GET_ALLOC(void* p){
 	return( (GET(p) & 0x1) );
 }
 
+static size_t GET_ALIGN(void* p){
+	return( (GET(p) & 0x7) );
+}
+
 static void* HDRP(void* bp){
 	return( ((char *)(bp) - WSIZE) );
 }
@@ -118,46 +124,46 @@ static void* GET_NEXT(void* bp){
 	return *((void **)(bp + WSIZE));
 }
 
-static void SET_NEXT(void* bp, void* nextp){
-	*((void **)(bp + WSIZE)) = nextp;
+static void SET_NEXT(void* bp, void* heapptrp){
+	*((void **)(bp + WSIZE)) = heapptrp;
 }
 
 static void remove_free_list(void* bp){
-    /* Get the address of the previous and next free block */
+    /* Get the address of the previous and heapptr free block */
     void* prev = (void *) GET_PREV(bp);
-    void* next = (void *) GET_NEXT(bp);
+    void* heapptr = (void *) GET_NEXT(bp);
 
     SET_PREV(bp, 0);
     SET_NEXT(bp, 0);
 
     if(prev == NULL){
-        if(next == NULL){ // this block not linked to other blocks
+        if(heapptr == NULL){ // this block not linked to other blocks
             free_listp = NULL;
 
         }
         else{ // this block is the start of linked list
-            SET_PREV(next, 0); // set pointer to next block 0
-            free_listp = next; // set the head of free list to the addr of next block
+            SET_PREV(heapptr, 0); // set pointer to heapptr block 0
+            free_listp = heapptr; // set the head of free list to the addr of heapptr block
 
         }
     }
     else{
-        if(next == NULL){//this block is the end of linked list
+        if(heapptr == NULL){//this block is the end of linked list
             SET_NEXT(prev, 0); //set the previous block as the last in the list
 
         }
         else{
             /* this block is in the middle of linked list
-               set previous free block and the next free block
+               set previous free block and the heapptr free block
                point to each other */
-            SET_PREV(next, prev);
-            SET_NEXT(prev, next);
+            SET_PREV(heapptr, prev);
+            SET_NEXT(prev, heapptr);
 
         }
     }
 	/*
 	for (char* ptr = free_listp; ptr != NULL; ptr = GET_NEXT(ptr)) {
-		printf("current: %p; prev: %p; next: %p\n",ptr, GET_PREV(ptr),GET_NEXT(ptr));
+		printf("current: %p; prev: %p; heapptr: %p\n",ptr, GET_PREV(ptr),GET_NEXT(ptr));
 	}
 	printf("\n\n");
 	*/
@@ -176,7 +182,7 @@ static void insert_free_list(void* bp){
         free_listp = bp; //move the head to point to the new block
 		/*
 		for (bp = free_listp; bp != NULL; bp = GET_NEXT(bp)) {
-			printf("current: %p; prev: %p; next: %p\n",bp, GET_PREV(bp),GET_NEXT(bp));
+			printf("current: %p; prev: %p; heapptr: %p\n",bp, GET_PREV(bp),GET_NEXT(bp));
 		}
 		printf("\n\n");
 		*/
@@ -189,21 +195,21 @@ static void insert_free_list(void* bp){
 
 static void *coalesce(void *bp){ // boundary tag coalesching to merge blocks (from textbook)
 	size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-	size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+	size_t heapptr_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
 	size_t size = GET_SIZE(HDRP(bp));
 
-	if (prev_alloc && next_alloc) { /* Case 1 */
+	if (prev_alloc && heapptr_alloc) { /* Case 1 */
 		insert_free_list(bp);
 		return bp;
 	}
 
-	else if (prev_alloc && !next_alloc) { /* Case 2 */
+	else if (prev_alloc && !heapptr_alloc) { /* Case 2 */
 		remove_free_list(NEXT_BLKP(bp));
 		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
 		PUT(HDRP(bp), PACK(size, 0));
 		PUT(FTRP(bp), PACK(size,0));
 	}
-	else if (!prev_alloc && next_alloc) { /* Case 3 */
+	else if (!prev_alloc && heapptr_alloc) { /* Case 3 */
 		remove_free_list(PREV_BLKP(bp));
 		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 		PUT(FTRP(bp), PACK(size, 0));
@@ -221,7 +227,7 @@ static void *coalesce(void *bp){ // boundary tag coalesching to merge blocks (fr
 		bp = PREV_BLKP(bp);
 	}
 	insert_free_list(bp);
-	//printf("current: %p; prev: %p; next: %p\n",bp, GET_PREV(bp),GET_NEXT(bp));
+	//printf("current: %p; prev: %p; heapptr: %p\n",bp, GET_PREV(bp),GET_NEXT(bp));
 	return bp;
 }
 
@@ -248,7 +254,7 @@ static void *extend_heap(size_t words) //extends the heap with new free block(fr
 }
 
 static void* find_fit(size_t asize){ //Finds a fitting block of size "asize" (from textbook)
-	/* First fit search */
+	/* Best fit search */
 	void *bp;
 	void *smallbp = NULL;
 	size_t smallSizeDif = 1000000000000;
@@ -310,6 +316,7 @@ bool mm_init(void)
  	PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); /* Prologue header */
  	PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
  	PUT(heap_listp + (3*WSIZE), PACK(0, 1)); /* Epilogue header */
+ 	final_block = (heap_listp + (3*WSIZE)); // needed for checkheap
  	heap_listp += (2*WSIZE);
 	free_listp = NULL;
 
@@ -393,7 +400,7 @@ void* realloc(void* ptr, size_t size)
 	else{
 		asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
 		}
-		
+
     /* IMPLEMENT THIS */
 	if (ptr == NULL){
 		return( malloc(size) );
@@ -454,7 +461,36 @@ bool mm_checkheap(int lineno)
 {
 #ifdef DEBUG
     /* Write code to check heap invariants here */
-    /* IMPLEMENT THIS */
+    
+    /* First we can check if pointers are valid (in heap) and aligned */
+	char *heapptr;
+	for (heapptr = GET_NEXT(heap_listp); heapptr != NULL; heapptr = GET_NEXT(heapptr)){
+		if((HDRP(heapptr) < GET_NEXT(NEXT(heap_listp))) || ((char *)GET(HDRP(heapptr)) > final_block) || (GET_ALIGN(HDRP(heapptr)) != 0)){
+			printf("Error, block at address %p does not have a valid heap address or is not aligned properly", heapptr);
+			return false;
+		}
+	}
+    /* Make sure all pointers in free list are actually free and valid */
+	for (heapptr = free_listp; GET_ALLOC(HDRP(heapptr)) == 0; heapptr = GET_NEXT(heapptr)) {
+		if(heapptr < mem_heap_lo() || heapptr > mem_heap_hi()) {
+       		printf("Error, free block at address %p invalid", heapptr);
+       		return false;
+     	}
+ 	}
+    /* Make sure no allocated blocks overlap*/
+ 	for (heapptr = free_listp; heapptr != NULL; heapptr = GET_NEXT(heapptr)){
+ 		if FTRP(heapptr) > HDRP(GET_NEXT(heapptr)) {
+ 			printf("Error, illegal overlap at %p", heapptr);
+ 		}
+ 	}
+    /* Are all blocks coalesced?*/
+    for (heapptr = free_listp; GET_ALLOC(HDRP(heapptr)) == 0; heapptr = GET_NEXT(heapptr)) {
+	char *prev = PREV_FREE(HDRP(heapptr));
+    	if(prev != NULL && HDRP(heapptr) - FTRP(prev) == DSIZE) {
+        	printf("Error, block at address %p is not coalesced!", heapptr);
+        	return false;
+     	}
+   	}
 #endif /* DEBUG */
     return true;
 }
